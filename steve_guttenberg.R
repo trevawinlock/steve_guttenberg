@@ -1,6 +1,3 @@
-library(gutenbergr)
-library(tidyverse)
-library(purrr)
 #Get all Books and IDS from Gutenberg
 data <- gutenberg_metadata
 #Randomly Chose X Amount of Books
