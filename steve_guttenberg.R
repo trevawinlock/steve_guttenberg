@@ -48,7 +48,7 @@ data <- filter(data, author != "Anonymous")
 data <- filter(data, gutenberg_bookshelf != "NA")
 
 #Randomly Chose X Amount of Books
-bookid <- data[sample(nrow(data), 10), ]
+bookid <- data[sample(nrow(data), y), ]
 
 #Create Null Variables for Loop
 listofbooks <- NULL
