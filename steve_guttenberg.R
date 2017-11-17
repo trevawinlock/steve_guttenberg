@@ -88,26 +88,33 @@ ids <- NULL
     }
   }
 
-#Paste IDS to Enviornment# 
-ids <<- ids
+bookid$gutenberg_id <- as.numeric(bookid$gutenberg_id)
+ids[,1] <- as.numeric(ids[,1])
+colnames(ids) <- "gutenberg_id"
+
+#Filter out Book IDS that we did not keep
+bookid <- filter(bookid, gutenberg_id %in% ids$id)
 
 #Loop through IDS and link the subject of the book to the book id
 subject <- NULL
-subjects <<- NULL
+subjects <- NULL
+
 
 for (i in 1:nrow(ids)) {
   
-  #Selects the Gutenberg Subjects for Each ID
-  subject <- gutenberg_subjects %>%
-    filter(gutenberg_id == ids[i,1])
   
-  #Selects only the LCSH Classification
-  subject <- data.frame(subset(subject, subject_type == 'lcsh'))
+  #Selects the Gutenberg Bookshelf Classification for Each ID
+  subject <- bookid$gutenberg_bookshelf[i]
   
-  #Combine all into Dataframe
-  subjects <<- rbind.data.frame(subjects, subject)
+  #Stores Subjects of IDS to List
+  subjects[[i]] <- subject
 }
 
+subjects <- as.data.frame(subjects)
+
+#Merge Subjects to ID
+idinfo <<- cbind(ids, subjects)
 
 }
+
 
