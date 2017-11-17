@@ -48,7 +48,7 @@ data <- filter(data, author != "Anonymous")
 data <- filter(data, gutenberg_bookshelf != "NA")
 
 #Randomly Chose X Amount of Books
-bookid <- data[sample(nrow(data), y), ]
+bookid <- data[sample(nrow(data), 10), ]
 
 #Create Null Variables for Loop
 listofbooks <- NULL
@@ -93,7 +93,7 @@ ids[,1] <- as.numeric(ids[,1])
 colnames(ids) <- "gutenberg_id"
 
 #Filter out Book IDS that we did not keep
-bookid <- filter(bookid, gutenberg_id %in% ids$id)
+bookid <- filter(bookid, gutenberg_id %in% ids$gutenberg_id)
 
 #Loop through IDS and link the subject of the book to the book id
 subject <- NULL
