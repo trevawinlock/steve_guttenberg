@@ -1,4 +1,4 @@
-# steve_guttenberg
+# Project Proposal
 
 Group 1 – Text Mining Project (Derek K., Ian O., Patrick P., Treva W.)
 
