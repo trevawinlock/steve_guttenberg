@@ -1,0 +1,420 @@
+---
+title: "Gute's Books"
+author: "Treva W., Derek K., Patrick P., Ian O."
+date: "December 12, 2017"
+output: html_document
+runtime: shiny
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+#Load Libraries
+library(gutenbergr)
+library(tidyverse)
+library(purrr)
+library(e1071)
+library(RMySQL)
+library(readability)
+library(RTextTools)
+library(tm)
+library(stringr)
+library(topicmodels)
+library(DT)
+library(knitr)
+
+getbooks <- function(x){
+  
+  #Set X to Numeric Value
+  y <- as.numeric(x)
+  
+  #Get all Books and IDS from Gutenberg
+  data <- gutenberg_metadata
+  
+  #Filter books with no text, non-english books, and remove presient speeches and other speeches 
+  #or congressional statements
+  data <- filter(data, has_text == "TRUE" )
+  data <- filter(data, language == "en" )
+  data <- filter(data, author != ("Jefferson, Thomas")) 
+  data <- filter(data, author != ("United States"))
+  data <- filter(data, author != ("Lincoln, Abraham"))
+  data <- filter(data, author != ("United States. Central Intelligence Agency"))
+  data <- filter(data, author != ("Kennedy, John F. (John Fitzgerald)"))
+  data <- filter(data, author != ("Henry, Patrick"))
+  data <- filter(data, author != ("United States. Bureau of the Census"))
+  data <- filter(data, author != ("Library of Congress"))
+  data <- filter(data, author != ("Unknown"))
+  data <- filter(data, author != ("Roosevelt, Franklin D. (Franklin Delano)"))
+  data <- filter(data, author != ("Beethoven, Ludwig van"))
+  data <- filter(data, author != ("Various"))
+  data <- filter(data, author != ("United States. Work Projects Administration"))
+  data <- filter(data, author != "Anonymous")
+  
+  #Filter out Books that do not have a Category
+  data <- filter(data, gutenberg_bookshelf != "NA")
+  
+  #Randomly Chose X Amount of Books
+  bookid <- data[sample(nrow(data), y), ]
+  
+  #Create Null Variables for Loop
+  listofbooks <- NULL
+  book <- NULL
+  
+  #Loop through the random IDS and pull the book text
+  #100 Books takes roughly 209 seconds to run
+  for (i in 1:nrow(bookid)) {
+    book <- gutenberg_download(bookid[i,1])
+    listofbooks[[i]] <- book
+  }
+  #Loop through list and extract each element as dataframe to enviornment and returns a dataframe
+  #of IDS of books
+  id <- NULL
+  ids <- NULL
+  books <- NULL
+  
+  #100 Books takes roughly 34 seconds to run and returned 19 books
+  for (i in 1:length(listofbooks)) {
+    
+    #Removes Books that have more then 4000 observations or less then 500 observations
+    if(nrow(data.frame(map(listofbooks[i], "text"))) > 7000 | nrow(data.frame(map(listofbooks[i], "text"))) < 500){
+      next
+    } else {
+      
+      #Prints the Book to the Enviornment with the title ID + gutenberg_id
+      x <- as.data.frame(listofbooks[[i]])
+      
+      x$text <- paste(x$text, collapse =" ")
+      
+      x <- x[1,]
+      
+      books <- rbind(books,x)
+      
+      #Creates Dataframe of gutenberg_id used
+      id <- listofbooks[[i]]$gutenberg_id[1]
+      ids[[i]] <- id
+      ids <- data.frame(matrix(unlist(ids), byrow=T),stringsAsFactors=FALSE)
+      ids <- na.omit(unique(ids))
+      
+    }
+  }
+  
+  bookid$gutenberg_id <- as.numeric(bookid$gutenberg_id)
+  ids[,1] <- as.numeric(ids[,1])
+  colnames(ids) <- "gutenberg_id"
+  
+  #Filter out Book IDS that we did not keep
+  bookid <- filter(bookid, gutenberg_id %in% ids$gutenberg_id)
+  
+  #Loop through IDS and link the subject of the book to the book id
+  subject <- NULL
+  subjects <- NULL
+  for (i in 1:nrow(ids)) {
+    
+    
+    #Selects the Gutenberg Bookshelf Classification for Each ID
+    subject <- bookid$gutenberg_bookshelf[i]
+    
+    #Stores Subjects of IDS to List
+    subjects[[i]] <- subject
+  }
+  subjects <- as.data.frame(subjects)
+  
+  #Loop through titles and link the subject of the book to the book id
+  title <- NULL
+  titles <- NULL
+  for (i in 1:nrow(ids)) {
+    
+    
+    #Selects the Gutenberg Bookshelf Classification for Each ID
+    title <- bookid$title[i]
+    
+    #Stores Subjects of IDS to List
+    titles[[i]] <- title
+  }
+  
+  titles <- as.data.frame(titles)
+  
+  #Loop through titles and link the subject of the book to the book id
+  author <- NULL
+  authors <- NULL
+  for (i in 1:nrow(ids)) {
+    
+    
+    #Selects the Gutenberg Bookshelf Classification for Each ID
+    author <- bookid$author[i]
+    
+    #Stores Subjects of IDS to List
+    authors[[i]] <- author
+  }
+  
+  authors <- as.data.frame(authors)
+  
+  #Merge Subjects to ID
+  idinfo <- cbind(ids, authors, titles, subjects)
+  books <- books
+  bookinfo <- cbind(books, authors, titles, subjects)
+  
+  ## Filters out Books with UTF-8 Encoding ##
+  for (i in 1:nrow(bookinfo)) {
+    if(Encoding(bookinfo[i,2]) == "UTF-8"){
+      
+      bookinfo <- bookinfo[-i,]
+      
+      books <- books[-i,]
+      
+      idinfo <- idinfo[-i,]
+    } else {
+      next
+    }
+  }
+  
+  for (i in 1:nrow(bookinfo)) {
+    if(Encoding(bookinfo[i,2]) == "UTF-8"){
+      
+      bookinfo <- bookinfo[-i,]
+      
+      books <- books[-i,]
+      
+      idinfo <- idinfo[-i,]
+    } else {
+      next
+    }
+  }
+
+  bookinfo <<- bookinfo
+    
+}
+
+getbooks(2000)
+
+#### Data Preperation ####
+
+## Condense subjects into more broad topcis for modeling process ##
+# Improves model performance with having larger groups #
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"War") == TRUE, "War", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"History") == TRUE, "History", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Science Fiction") == TRUE, "Science Fiction", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Animals") == TRUE | str_detect(bookinfo$subjects,"Zoology") == TRUE, "Animals", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"[C-c]hild") == TRUE, "Children", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Cookery") == TRUE, "Cookery", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Fantasy") == TRUE, "Fantasy", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Harvard Classics") == TRUE, "Harvard Classics", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Native America") == TRUE, "Native America", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Mythology") == TRUE, "Mythology", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Opera") == TRUE, "Music", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Christianity") == TRUE | str_detect(bookinfo$subjects,"Islam") == TRUE | str_detect(bookinfo$subjects,"Buddhism") == TRUE | str_detect(bookinfo$subjects,"Judaism") == TRUE | str_detect(bookinfo$subjects,"Latter Day Saints") == TRUE | str_detect(bookinfo$subjects,"Paganism") == TRUE | str_detect(bookinfo$subjects,"Bah?'? Faith") == TRUE | str_detect(bookinfo$subjects,"Hinduism") == TRUE| str_detect(bookinfo$subjects,"Atheism") == TRUE, "Religion", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Humor") == TRUE, "Humor", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Art") == TRUE | str_detect(bookinfo$subjects,"Photography") == TRUE | str_detect(bookinfo$subjects,"Masterpieces in Colour") == TRUE, "Art/Photography", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"African American Writers") == TRUE, "African American Writers", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Slavery") == TRUE | str_detect(bookinfo$subjects,"Racism") == TRUE, "Racism", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Architecture") == TRUE, "Architecture", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Bestsellers") == TRUE, "Bestsellers", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Technology") == TRUE, "Technology", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Australia") == TRUE | str_detect(bookinfo$subjects,"Egypt") == TRUE |str_detect(bookinfo$subjects,"Africa") == TRUE |str_detect(bookinfo$subjects,"United Kingdom") == TRUE |str_detect(bookinfo$subjects,"Germany") == TRUE |str_detect(bookinfo$subjects,"New Zealand") == TRUE |str_detect(bookinfo$subjects,"Italy") == TRUE |str_detect(bookinfo$subjects,"Czech") == TRUE |str_detect(bookinfo$subjects,"United States") == TRUE |str_detect(bookinfo$subjects,"India") == TRUE |str_detect(bookinfo$subjects,"France") == TRUE |str_detect(bookinfo$subjects,"Canada") == TRUE | str_detect(bookinfo$subjects,"Mexico") == TRUE | str_detect(bookinfo$subjects,"Iraq") == TRUE | str_detect(bookinfo$subjects,"Iran") == TRUE | str_detect(bookinfo$subjects,"Syria") == TRUE | str_detect(bookinfo$subjects,"China") == TRUE | str_detect(bookinfo$subjects,"Japan") == TRUE | str_detect(bookinfo$subjects,"Russia") == TRUE | str_detect(bookinfo$subjects,"USSR") == TRUE | str_detect(bookinfo$subjects,"Sweden") == TRUE | str_detect(bookinfo$subjects,"Switzerland") == TRUE, "Country", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Country") == TRUE, "Geography", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Movie Books") == TRUE, "Movie Books", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Horticulture") == TRUE, "Horticulture", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Sociology") == TRUE, "Sociology", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Classical Antiquity") == TRUE, "Classical Antiquity", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Horror") == TRUE |str_detect(bookinfo$subjects,"Witchcraft") == TRUE, "Horror", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Play") == TRUE, "Plays", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Education") == TRUE | str_detect(bookinfo$subjects,"School") == TRUE, "Education", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Law") == TRUE, "Law", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Reviews") == TRUE, "Reviews", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Fiction") == TRUE, "Fiction", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Nonfiction") == TRUE, "Nonfiction", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Political") == TRUE | str_detect(bookinfo$subjects,"Politics") == TRUE | str_detect(bookinfo$subjects,"Government") == TRUE | str_detect(bookinfo$subjects,"Anarchism") == TRUE, "Politics/Government", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Travel") == TRUE | str_detect(bookinfo$subjects,"Transportation") == TRUE, "Travel", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Mathematics") == TRUE | str_detect(bookinfo$subjects,"Biology") == TRUE | str_detect(bookinfo$subjects,"Microscopy") == TRUE | str_detect(bookinfo$subjects,"Physics") == TRUE | str_detect(bookinfo$subjects,"Chemistry") == TRUE | str_detect(bookinfo$subjects,"Astronomy") == TRUE | str_detect(bookinfo$subjects,"Microbiology") == TRUE | str_detect(bookinfo$subjects,"Geology") == TRUE, "Science/Math", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Botany") == TRUE | str_detect(bookinfo$subjects,"Forestry") == TRUE | str_detect(bookinfo$subjects,"Horticulture") == TRUE, "Botany/Horticulture", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Reference") == TRUE | str_detect(bookinfo$subjects,"Biblio") == TRUE, "Reference", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Classics") == TRUE | str_detect(bookinfo$subjects,"Best Books Ever") == TRUE, "Classics", as.character(bookinfo$subjects))
+
+bookinfo$subjects <- ifelse(str_detect(bookinfo$subjects,"Anthropology") == TRUE | str_detect(bookinfo$subjects,"Psychology") == TRUE | str_detect(bookinfo$subjects,"Sociology") == TRUE | str_detect(bookinfo$subjects,"Economics") == TRUE, "Social Sciences", as.character(bookinfo$subjects))
+
+bookinfo$Child_Adult <- ifelse(str_detect(bookinfo$subjects,"[C-c]hild") == TRUE, "Child", "Adult")
+
+
+
+## Using the distance formula from what we did earlier in class to help what model which book is closer to the one chosen ##
+# based of reading level number and probability of subject prediction #
+# This would be like our recomendded books #
+
+
+
+#### Reading Level ####
+
+bookinfo1 <- bookinfo
+bookinfo2 <- NULL
+
+# For loop to generate reading level
+for (i in 1:nrow(bookinfo)) {
+  bookinfo2[[i]] <- readability(bookinfo[i,2], NULL)
+}
+
+## Map the Reading Level to the Book ##
+reading_level <- map(bookinfo2, "Coleman_Liau")
+
+bookinfo1$reading_level <- reading_level
+
+bookinfo1$reading_level <- as.numeric(bookinfo1$reading_level)
+
+readlevel <- bookinfo1[,c(1,3:4,6:7)]
+
+#### Probability ####
+
+dtMatrix <- create_matrix(bookinfo$text, stemWords = TRUE, removePunctuation = TRUE, removeStopwords = TRUE, toLower = TRUE, stripWhitespace = TRUE, weighting = tm::weightTfIdf)
+
+#Configure the training data
+container <- create_container(dtMatrix, factor(bookinfo$subjects), trainSize=1:(nrow(bookinfo)*.7),testSize = ((nrow(bookinfo)*.7)+1):nrow(bookinfo), virgin=FALSE)
+
+### Maxent Model ###
+# Train Maxent Model #
+maxent_model <- train_model(container, "MAXENT")
+
+# Test Maxent Model #
+maxent_classify <- as.data.frame(classify_model(container, maxent_model))
+
+
+maxent_summary <- as.data.frame(maxent_classify)
+maxent_summary <- cbind(maxent_summary, bookinfo[((nrow(bookinfo)*.7)+1):(nrow(bookinfo)), c(1,4)])
+colnames(maxent_summary) <- c("Subject", "Probability", "Gutenberg_ID", "Title")
+
+# Final Output with the Subject Grouping and the Probabilties of the text matching that subject (choses highest probabilities for all subjects) #
+maxent_summary <- select(maxent_summary, "Gutenberg_ID", "Title", "Subject", "Probability")
+
+
+#### Distance Measure ####
+
+readlevel1 <- readlevel[((nrow(readlevel)*.7)+1):nrow(readlevel),]
+
+distform <- cbind(readlevel1, maxent_summary)
+distform1 <- distform[,c(1,8,5,9)]
+distform2 <- distform[,c(1:5,8)]
+
+### Change for Table ###
+bookinfo3 <- distform2
+bookinfo3$reading_level <- round(bookinfo3$reading_level, 0)
+bookinfo3 <- as.data.frame(bookinfo3)
+
+## Distance Measure Formula ##
+
+foodpref083 <- function (boi, dataspec) {
+  
+  #Call Dataspec into Variable
+  data <- dataspec
+  
+  data <- filter(data, Subject == (data$Subject[data$gutenberg_id == boi]))
+  
+  data <- data[,c(1,3,4)]
+  
+  #Label Row Names with Names of Individuals and Remove numbered Rows
+  row.names(data)<- data$gutenberg_id
+  #row.names(data)<- data$name
+  Book <- data[,c(2,3)]
+  
+  
+  #Uses Dist function to create a matrix with all individuals distances from each other
+  x <- dist(Book, method = "minkowski", diag = FALSE, upper = FALSE)
+  
+  #Puts Distance output into a data frame, and calls the column of the specified individual
+  x <- as.matrix(x)
+  x <- as.data.frame(x)
+  compare <- as.data.frame(x[boi,])
+  df1 <- (compare[,-which(names(compare) == boi)])
+  
+  #Arranges order for better graphical output
+  compare <- sort(df1, decreasing = FALSE)
+  compare1 <- as.data.frame((t(compare)))
+  
+  # Plot Data
+  
+  nlmin <- 0
+  
+  nlmax <- max(compare1[1])
+  
+  xlim <- c(nlmin, nlmax)
+  ylim <- c(0,45);
+  px <- compare1[[1]]
+  py <- rep(0,length(compare1[[1]]))
+  lx.buf <- 1;
+  lx <- seq(xlim[1]+lx.buf,xlim[2],len=length(px))
+  ly <- 15;
+  
+  #Plot Outline
+  par(xaxs='i',yaxs='i',mar=c(5,1,1,1))
+  plot(NA,xlim=xlim,ylim=ylim,axes=F,ann=F)
+  axis(1, at = seq(0, ceiling(nlmax), by = 1))
+  
+  #Plot Elements
+  segments(px,py,lx,ly)
+  points(px,py,pch=16,xpd=NA)
+  text(lx,ly,labels=rownames(compare1),pos=3.5,srt=90)
+  
+}
+
+```
+
+
+## Deployment
+
+Gute's Books strives to bring an interactive, easy to understand user interface that allows books to be filtered by varying subjects, reading levels, titles and authors. We also display an interactive recommendation plot that shows book ID's with similar characteristics to the chosen book.  
+
+
+## Book Filter Previews
+
+```{r}
+datatable(bookinfo3, options = list(), class = 'cell-border stripe', callback = JS("return table;"), caption = "Steve's Books", filter = c("top"), colnames = c("ID", "Author", "Title", "Book Type", "Reading Level", "Subject"), escape = TRUE, style = "default", width = NULL, height = NULL, 
+          elementId = NULL,autoHideNavigation = getOption("DT.autoHideNavigation", 
+                                                                                                                NULL), selection = c("multiple", "single", "none"), extensions = 'FixedColumns', 
+          plugins = NULL)
+```
+
+## Recommended Text
+
+```{r}
+inputPanel(
+selectInput("gutenberg_id", label = "Book ID",
+              choices = distform1$gutenberg_id)
+)
+
+x <- reactive(input$gutenberg_id)
+
+renderPlot(foodpref083(x(), distform1)) 
+
+```
